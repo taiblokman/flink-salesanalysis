@@ -21,6 +21,7 @@ package org.taib;
 import org.apache.flink.api.common.functions.JoinFunction;
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.common.functions.ReduceFunction;
+import org.apache.flink.api.common.io.OutputFormat;
 import org.apache.flink.api.common.operators.Order;
 import org.apache.flink.api.common.typeinfo.TypeHint;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
@@ -30,11 +31,17 @@ import org.apache.flink.api.java.operators.DataSource;
 import org.apache.flink.api.java.tuple.Tuple;
 import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.tuple.Tuple6;
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.taib.dto.CategorySalesDTO;
 import org.taib.entities.OrderItem;
 import org.taib.entities.Product;
+
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
 
 
 /**
@@ -51,6 +58,7 @@ import org.taib.entities.Product;
  */
 public class DataBatchJob {
 
+	// Run with /Users/taiblokman/decode/flink-1.18.1/bin/flink run -c org.taib.DataBatchJob target/SalesAnalysis-1.0-SNAPSHOT.jar
 	public static void main(String[] args) throws Exception {
 		// Sets up the execution environment, which is the main entry point
 		// to building Flink applications.
@@ -95,15 +103,44 @@ public class DataBatchJob {
 		//sort by total sales in descending order
 		categorySales.sortPartition("totalSales", Order.DESCENDING).print();
 
-		        //convert to tuple
-        DataSet<Tuple3<String, Float, Integer>> conversion = categorySales
-                .map((MapFunction<CategorySalesDTO, Tuple3<String, Float, Integer>>) record
-                        -> new Tuple3<>(record.getCategory(), record.getTotalSales(), record.getCount()))
-                .returns(new TypeHint<Tuple3<String, Float, Integer>>() {
-                });
+		// One method to save to a file but this is slow, use OutputFormat method instead
+		// convert to tuple
 
-        conversion.writeAsCsv("/Users/taiblokman/decode/SalesAnalysis/output/tuple-output.csv",
-                "\n", ",", FileSystem.WriteMode.OVERWRITE);
+//        DataSet<Tuple3<String, Float, Integer>> conversion = categorySales
+//                .map((MapFunction<CategorySalesDTO, Tuple3<String, Float, Integer>>) record
+//                        -> new Tuple3<>(record.getCategory(), record.getTotalSales(), record.getCount()))
+//                .returns(new TypeHint<Tuple3<String, Float, Integer>>() {
+//                });
+//
+//        conversion.writeAsCsv("/Users/taiblokman/decode/SalesAnalysis/output/tuple-output.csv",
+//                "\n", ",", FileSystem.WriteMode.OVERWRITE);
+		categorySales.output(new OutputFormat<CategorySalesDTO>() {
+			private transient BufferedWriter writer;
+
+			@Override
+			public void configure(Configuration configuration) {
+				// configuration steps (if needed) can be here
+			}
+
+			@Override
+			public void open(int taskNumber, int numTasks) throws IOException {
+				File outputFile = new File("/Users/taiblokman/decode/SalesAnalysis/output/tuple-outputv2.csv");
+				this.writer = new BufferedWriter(new FileWriter(outputFile, true));
+			}
+
+			@Override
+			public void writeRecord(CategorySalesDTO categorySalesDTO) throws IOException {
+				writer.write(categorySalesDTO.getCategory()
+						+ "," + categorySalesDTO.getTotalSales()
+						+ "," + categorySalesDTO.getCount());
+				writer.newLine();
+			}
+
+			@Override
+			public void close() throws IOException {
+				writer.close();
+			}
+		});
 
 		/*
 		 * Here, you can start creating your execution plan for Flink.
